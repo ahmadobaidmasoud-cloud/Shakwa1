@@ -1,0 +1,139 @@
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, Generic, TypeVar, List
+from uuid import UUID
+from datetime import datetime
+from enum import Enum
+
+
+class UserRole(str, Enum):
+    super_admin = "super-admin"
+    admin = "admin"
+    manager = "manager"
+    user = "user"
+
+
+# ============= REQUEST SCHEMAS =============
+
+class UserLoginRequest(BaseModel):
+    """User login request"""
+    login: str = Field(..., description="Username or email")
+    password: str = Field(..., min_length=6, description="User password")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "login": "admin@example.com",
+                "password": "password123"
+            }
+        }
+
+
+class UserRegisterRequest(BaseModel):
+    """User registration request"""
+    username: str = Field(..., min_length=3, max_length=50)
+    email: EmailStr
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    password: str = Field(..., min_length=6)
+    role: UserRole = Field(default=UserRole.user)
+
+
+class TenantUserCreate(BaseModel):
+    """Tenant admin user creation"""
+    username: str = Field(..., min_length=3, max_length=50)
+    email: EmailStr
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    password: str = Field(..., min_length=6)
+    role: UserRole = Field(default=UserRole.user)
+    manager_id: Optional[UUID] = None
+
+
+# ============= RESPONSE SCHEMAS =============
+
+class UserOut(BaseModel):
+    """User response schema"""
+    id: UUID
+    username: str
+    email: EmailStr
+    first_name: str
+    last_name: str
+    role: UserRole
+    is_active: bool
+    tenant_id: Optional[UUID] = None
+    manager_id: Optional[UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "username": "admin",
+                "email": "admin@example.com",
+                "first_name": "Admin",
+                "last_name": "User",
+                "role": "super-admin",
+                "is_active": True,
+                "created_at": "2024-02-10T10:00:00",
+                "updated_at": "2024-02-10T10:00:00"
+            }
+        }
+
+
+class LoginResponse(BaseModel):
+    """Login response with token and user info"""
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "token_type": "bearer",
+                "user": {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "username": "admin",
+                    "email": "admin@example.com",
+                    "first_name": "Admin",
+                    "last_name": "Admin",
+                    "role": "super-admin",
+                    "is_active": True,
+                    "created_at": "2024-02-10T10:00:00",
+                    "updated_at": "2024-02-10T10:00:00"
+                }
+            }
+        }
+
+
+class Msg(BaseModel):
+    """Message response"""
+    message: str
+
+
+# Generic API Response
+T = TypeVar("T")
+
+
+class APIResponse(BaseModel, Generic[T]):
+    """Generic API Response wrapper"""
+    status_code: int
+    message: str
+    data: Optional[T] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status_code": 200,
+                "message": "Success",
+                "data": None
+            }
+        }
+
+
+class TokenPayload(BaseModel):
+    """Token payload schema"""
+    sub: str
+    exp: Optional[int] = None
