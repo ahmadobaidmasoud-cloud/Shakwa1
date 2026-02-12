@@ -3,9 +3,11 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 
 from app.db.session import get_db
+from app.api.deps import get_current_user
 from app.schemas.user import (
     UserLoginRequest,
     UserRegisterRequest,
+    PasswordChangeRequest,
     LoginResponse,
     Msg,
     APIResponse,
@@ -155,3 +157,44 @@ async def health_check():
     Returns status of the API.
     """
     return {"message": "API is running"}
+
+
+@router.post(
+    "/change-password",
+    response_model=Msg,
+    status_code=status.HTTP_200_OK,
+    tags=["Authentication"],
+    responses={
+        400: {"model": APIResponse, "description": "Invalid old password"},
+        401: {"model": APIResponse, "description": "Unauthorized"},
+    }
+)
+async def change_password(
+    password_data: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Change password for the current logged-in user.
+    
+    Requires:
+    - **old_password**: Current password (for verification)
+    - **new_password**: New password (minimum 6 characters)
+    
+    Returns success message if password was changed.
+    """
+    # Attempt to change password
+    success = crud_user.change_password(
+        db,
+        current_user.id,
+        password_data.old_password,
+        password_data.new_password,
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid old password",
+        )
+    
+    return {"message": "Password changed successfully"}

@@ -1,4 +1,5 @@
-from sqlalchemy import Column, String, Boolean, DateTime, func, Enum, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, func, Enum, ForeignKey, Integer
+from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.db.session import Base
 from datetime import datetime
@@ -19,6 +20,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True, index=True)
     manager_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
     username = Column(String(50), unique=True, index=True, nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
     first_name = Column(String(100), nullable=False)
@@ -28,6 +30,9 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    category = relationship("Category", lazy="joined", foreign_keys=[category_id])
 
     class Config:
         from_attributes = True

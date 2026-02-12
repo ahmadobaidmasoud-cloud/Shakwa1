@@ -47,6 +47,32 @@ class TenantUserCreate(BaseModel):
     password: str = Field(..., min_length=6)
     role: UserRole = Field(default=UserRole.user)
     manager_id: Optional[UUID] = None
+    category_id: Optional[int] = None
+
+
+class PasswordChangeRequest(BaseModel):
+    """Password change request"""
+    old_password: str = Field(..., min_length=6, description="Current password")
+    new_password: str = Field(..., min_length=6, description="New password")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "old_password": "currentpassword123",
+                "new_password": "newpassword456"
+            }
+        }
+
+
+# ============= CATEGORY SCHEMA =============
+
+class CategoryBrief(BaseModel):
+    """Brief category information"""
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
 
 
 # ============= RESPONSE SCHEMAS =============
@@ -62,6 +88,8 @@ class UserOut(BaseModel):
     is_active: bool
     tenant_id: Optional[UUID] = None
     manager_id: Optional[UUID] = None
+    category_id: Optional[int] = None
+    category: Optional[CategoryBrief] = None
     created_at: datetime
     updated_at: datetime
 

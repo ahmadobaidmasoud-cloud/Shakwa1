@@ -96,6 +96,7 @@ def create_user_in_tenant(db: Session, tenant_id: UUID, user_data: TenantUserCre
         role=user_data.role,
         tenant_id=tenant_id,
         manager_id=user_data.manager_id,
+        category_id=user_data.category_id,
         is_active=True,
     )
     db.add(db_user)
@@ -192,3 +193,32 @@ def generate_temp_password(length: int = 12) -> str:
     alphabet = string.ascii_letters + string.digits + string.punctuation.replace("'", "").replace('"', "")
     password = ''.join(secrets.choice(alphabet) for i in range(length))
     return password
+
+
+def change_password(db: Session, user_id: UUID, old_password: str, new_password: str) -> bool:
+    """
+    Change password for a user after verifying old password
+    
+    Args:
+        db: Database session
+        user_id: User ID
+        old_password: Current password (plain text)
+        new_password: New password (plain text)
+        
+    Returns:
+        True if password changed successfully, False otherwise
+    """
+    user = get_user_by_id(db, user_id)
+    if not user:
+        return False
+    
+    # Verify old password
+    if not verify_password(old_password, user.hashed_password):
+        return False
+    
+    # Hash and update new password
+    hashed_password = get_password_hash(new_password)
+    user.hashed_password = hashed_password
+    db.commit()
+    db.refresh(user)
+    return True

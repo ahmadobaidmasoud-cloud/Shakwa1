@@ -131,9 +131,8 @@ class EmailService:
                     <h3 style="color: #667eea; margin-top: 25px;">Next Steps</h3>
                     <ol>
                         <li>Log in to your dashboard using the credentials above</li>
-                        <li>Change your temporary password immediately</li>
                         <li>Set up your tenant organization</li>
-                        <li>Invite team members to collaborate</li>
+                        <li>Add team members to collaborate</li>
                     </ol>
                     
                     <p style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; color: #666; font-size: 12px;">

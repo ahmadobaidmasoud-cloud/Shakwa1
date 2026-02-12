@@ -86,6 +86,14 @@ async def create_tenant(
             last_name=tenant_data.admin_last_name,
             tenant_id=tenant.id,
         )
+
+        # Now we need to create ticket_configuration for the tenant with default values
+        from app.crud import ticket_configuration as crud_ticket_config
+        crud_ticket_config.create_ticket_configuration(db, tenant.id)
+
+        # create default configuration for the tenant
+        from app.crud import configuration as crud_configuration
+        crud_configuration.create_default_configuration(db, tenant.id)
         
         # Send welcome email
         email_sent = email_service.send_welcome_email(

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 import logging
+from uuid import UUID
 
 from app.db.session import get_db
 from app.api.deps import get_current_admin
@@ -95,3 +96,35 @@ async def list_tenant_users(
         )
 
     return crud_user.get_users_by_tenant(db, current_user.tenant_id, skip=skip, limit=limit)
+
+
+@router.get(
+    "/users/{user_id}",
+    response_model=UserOut,
+    status_code=status.HTTP_200_OK,
+    tags=["Admin - Users"],
+    responses={
+        403: {"model": APIResponse, "description": "Not authorized for admin"},
+        404: {"model": APIResponse, "description": "User not found"},
+    },
+)
+async def get_tenant_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """Get a specific user from the current tenant (Admin only)."""
+    if not current_user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant context missing for current user",
+        )
+
+    user = crud_user.get_user_by_id_in_tenant(db, user_id, current_user.tenant_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    return user
