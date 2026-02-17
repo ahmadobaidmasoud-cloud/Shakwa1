@@ -109,12 +109,21 @@ class UserOut(BaseModel):
             }
         }
 
+class TenantBrief(BaseModel):
+    """Brief tenant information for login response"""
+    id: UUID
+    slug: str
+    org_name: str
+
+    class Config:
+        from_attributes = True
 
 class LoginResponse(BaseModel):
     """Login response with token and user info"""
     access_token: str
     token_type: str = "bearer"
     user: UserOut
+    tenant: Optional[TenantBrief] = None
 
     class Config:
         json_schema_extra = {

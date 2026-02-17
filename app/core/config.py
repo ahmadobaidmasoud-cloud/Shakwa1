@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     
     # Frontend URL for email links
     FRONTEND_URL: str = "http://localhost:3000"
+    
+    # Speechmatics Configuration
+    SPEECHMATICS_API_KEY: Optional[str] = None
+
+    OLLAMA_API_KEY: Optional[str] = None
 
     class Config:
         env_file = ".env"
@@ -41,3 +46,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+print("Loaded settings:", settings.dict())

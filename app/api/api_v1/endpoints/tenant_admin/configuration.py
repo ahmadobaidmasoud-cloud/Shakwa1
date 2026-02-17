@@ -19,8 +19,12 @@ from app.crud.configuration import (
 
 router = APIRouter()
 
+TAGS = ["Tenant Admin - Configurations"]
 
-@router.post("/configurations", response_model=ConfigurationOut, status_code=status.HTTP_201_CREATED)
+
+@router.post("/configurations", response_model=ConfigurationOut, 
+             tags=TAGS,
+             status_code=status.HTTP_201_CREATED)
 def create_config(
     config_data: ConfigurationCreate,
     db: Session = Depends(get_db),
@@ -38,7 +42,7 @@ def create_config(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/configurations", response_model=list[ConfigurationOut])
+@router.get("/configurations", response_model=list[ConfigurationOut], tags=TAGS)
 def list_configurations(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -54,7 +58,7 @@ def list_configurations(
     return get_configurations_by_tenant(db, current_user.tenant_id, skip, limit)
 
 
-@router.get("/configurations-count")
+@router.get("/configurations-count", tags=TAGS)
 def get_configurations_count(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
@@ -68,7 +72,7 @@ def get_configurations_count(
     return {"count": count_configurations(db, current_user.tenant_id)}
 
 
-@router.get("/configurations/{config_id}", response_model=ConfigurationOut)
+@router.get("/configurations/{config_id}", response_model=ConfigurationOut, tags=TAGS)
 def get_configuration(
     config_id: int,
     db: Session = Depends(get_db),
@@ -86,7 +90,7 @@ def get_configuration(
     return config
 
 
-@router.get("/configurations/by-key/{key}", response_model=ConfigurationOut)
+@router.get("/configurations/by-key/{key}", response_model=ConfigurationOut, tags=TAGS)
 def get_configuration_by_key_endpoint(
     key: str,
     db: Session = Depends(get_db),
@@ -104,7 +108,7 @@ def get_configuration_by_key_endpoint(
     return config
 
 
-@router.patch("/configurations/{config_id}", response_model=ConfigurationOut)
+@router.patch("/configurations/{config_id}", response_model=ConfigurationOut, tags=TAGS)
 def update_config(
     config_id: int,
     config_data: ConfigurationUpdate,
@@ -123,7 +127,7 @@ def update_config(
     return config
 
 
-@router.delete("/configurations/{config_id}")
+@router.delete("/configurations/{config_id}", tags=TAGS)
 def delete_config(
     config_id: int,
     db: Session = Depends(get_db),

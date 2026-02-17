@@ -33,6 +33,10 @@ class User(Base):
 
     # Relationships
     category = relationship("Category", lazy="joined", foreign_keys=[category_id])
+    assigned_tickets = relationship("TicketAssignment", foreign_keys="TicketAssignment.assigned_to_user_id", back_populates="assigned_to_user")
+    assigned_by_tickets = relationship("TicketAssignment", foreign_keys="TicketAssignment.assigned_by_user_id", back_populates="assigned_by_user")
+    escalated_from_tickets = relationship("TicketEscalation", foreign_keys="TicketEscalation.escalated_from_user_id", back_populates="escalated_from_user")
+    escalated_to_tickets = relationship("TicketEscalation", foreign_keys="TicketEscalation.escalated_to_user_id", back_populates="escalated_to_user")
 
     class Config:
         from_attributes = True

@@ -13,6 +13,7 @@ from app.schemas.user import (
     APIResponse,
 )
 from app.models.user import User
+from app.models.tenant import Tenant
 from app.crud import user as crud_user
 from app.core.security import create_access_token
 from app.core.config import settings
@@ -74,11 +75,18 @@ async def login(
         expires_delta=access_token_expires
     )
     
+    # Fetch tenant details if user has a tenant_id
+    tenant = None
+    if user.tenant_id:
+        tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+    
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": user,
+        "tenant": tenant,
     }
+    
 
 
 @router.post(
@@ -138,10 +146,16 @@ async def register(
         expires_delta=access_token_expires
     )
     
+    # Fetch tenant details if user has a tenant_id
+    tenant = None
+    if new_user.tenant_id:
+        tenant = db.query(Tenant).filter(Tenant.id == new_user.tenant_id).first()
+    
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": new_user,
+        "tenant": tenant,
     }
 
 

@@ -40,6 +40,7 @@ class TenantOut(BaseModel):
     """Tenant response schema"""
     id: UUID
     org_name: str
+    slug: Optional[str] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

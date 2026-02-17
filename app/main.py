@@ -6,9 +6,12 @@ from app.db.session import Base, engine
 from app.api.api_v1.endpoints import auth as auth_router
 from app.api.api_v1.endpoints import super_admin as super_admin_router
 from app.api.api_v1.endpoints import admin as admin_router
+from app.api.api_v1.endpoints import user as user_router
+from app.api.api_v1.endpoints import public as public_router
 from app.api.api_v1.endpoints.tenant_admin import categories as categories_router
 from app.api.api_v1.endpoints.tenant_admin import ticket_configuration as ticket_config_router
 from app.api.api_v1.endpoints.tenant_admin import configuration as config_router
+from app.api.api_v1.endpoints.tenant_admin import tickets as tickets_router
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -40,12 +43,15 @@ if settings.BACKEND_CORS_ORIGINS:
     )
 
 # Include routers
+app.include_router(public_router.router, prefix="/api")
 app.include_router(auth_router.router, prefix="/api/v1/auth")
 app.include_router(super_admin_router.router, prefix="/api/v1/super-admin")
 app.include_router(admin_router.router, prefix="/api/v1/admin")
+app.include_router(user_router.router, prefix="/api/v1/user")
 app.include_router(categories_router.router, prefix="/api/v1/admin")
 app.include_router(ticket_config_router.router, prefix="/api/v1/admin")
 app.include_router(config_router.router, prefix="/api/v1/admin")
+app.include_router(tickets_router.router, prefix="/api/v1/admin")
 
 
 # Root endpoints
