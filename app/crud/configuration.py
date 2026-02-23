@@ -109,6 +109,6 @@ def count_configurations(db: Session, tenant_id: UUID) -> int:
 def create_default_configuration(db: Session, tenant_id: UUID) -> Configuration:
     """Create a default configuration for a tenant when it's created"""
     for config in [
-        {"label": "SLA", "value_type": "int", "value": "60"}]:
+        {"label": "SLA", "value_type": "int", "value": "5"}]:
         create_configuration(db, tenant_id, ConfigurationCreate(**config))
     return get_configurations_by_tenant(db, tenant_id)

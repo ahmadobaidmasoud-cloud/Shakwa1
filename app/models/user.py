@@ -28,15 +28,19 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     role = Column(Enum(UserRole), default=UserRole.user, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    is_accepting_tickets = Column(Boolean, default=True, nullable=False)
+    capacity = Column(Integer, default=10, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     category = relationship("Category", lazy="joined", foreign_keys=[category_id])
+    manager = relationship("User", remote_side=[id], foreign_keys=[manager_id], lazy="joined")
     assigned_tickets = relationship("TicketAssignment", foreign_keys="TicketAssignment.assigned_to_user_id", back_populates="assigned_to_user")
     assigned_by_tickets = relationship("TicketAssignment", foreign_keys="TicketAssignment.assigned_by_user_id", back_populates="assigned_by_user")
     escalated_from_tickets = relationship("TicketEscalation", foreign_keys="TicketEscalation.escalated_from_user_id", back_populates="escalated_from_user")
     escalated_to_tickets = relationship("TicketEscalation", foreign_keys="TicketEscalation.escalated_to_user_id", back_populates="escalated_to_user")
+    notifications = relationship("Notification", foreign_keys="Notification.user_id", back_populates="user")
 
     class Config:
         from_attributes = True

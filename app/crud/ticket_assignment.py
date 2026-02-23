@@ -2,6 +2,8 @@ from sqlalchemy.orm import Session
 from app.models.ticket_assignment import TicketAssignment, TicketEscalation
 from app.models.ticket import Ticket
 from app.schemas.ticket_assignment import TicketAssignmentCreate, TicketAssignmentUpdate, TicketEscalationCreate
+from app.schemas.notification import NotificationCreate
+from app.crud import notification as notification_crud
 from uuid import UUID
 from typing import Optional, List
 from datetime import datetime
@@ -11,7 +13,7 @@ def create_ticket_assignment(
     db: Session,
     assignment_data: TicketAssignmentCreate
 ) -> TicketAssignment:
-    """Create a new ticket assignment"""
+    """Create a new ticket assignment and send notification to assigned user"""
     now = datetime.utcnow().isoformat()
     db_assignment = TicketAssignment(
         ticket_id=assignment_data.ticket_id,
@@ -34,6 +36,19 @@ def create_ticket_assignment(
     
     db.commit()
     db.refresh(db_assignment)
+    
+    # Send notification to assigned user
+    if ticket:
+        notification_data = NotificationCreate(
+            title="New Ticket Assigned",
+            message=f"You have been assigned ticket - {ticket.title}",
+            notification_type="ticket_assigned",
+            user_id=assignment_data.assigned_to_user_id,
+            ticket_id=assignment_data.ticket_id,
+            related_user_id=assignment_data.assigned_by_user_id,
+        )
+        notification_crud.create_notification(db, notification_data)
+    
     return db_assignment
 
 

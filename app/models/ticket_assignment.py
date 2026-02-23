@@ -9,7 +9,9 @@ from app.db.session import Base
 class AssignmentType(str, Enum):
     """Assignment type enumeration"""
     ASSIGNED = "assigned"
+    AUTO_ASSIGNED = "auto_assigned"
     ESCALATED = "escalated"
+    AUTO_ESCALATED = "auto_escalated"
     REASSIGNED = "reassigned"
     COMPLETED = "completed"
 
@@ -23,7 +25,7 @@ class TicketAssignment(Base):
     assigned_to_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     assigned_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     
-    assignment_type = Column(SQLEnum(AssignmentType), default=AssignmentType.ASSIGNED, nullable=False)
+    assignment_type = Column(String(50), default=AssignmentType.ASSIGNED.value, nullable=False)
     is_current = Column(Boolean, default=True, nullable=False, index=True)
     
     assigned_at = Column(String, nullable=False)

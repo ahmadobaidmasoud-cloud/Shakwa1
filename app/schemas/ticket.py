@@ -158,6 +158,19 @@ class TicketAssignmentHistoryItem(BaseModel):
         from_attributes = True
 
 
+class TicketPublicOut(BaseModel):
+    """Public-facing ticket schema — safe to return without authentication"""
+    id: UUID
+    title: Optional[str] = None
+    description: str
+    status: TicketStatus
+    created_at: str
+    updated_at: str
+
+    class Config:
+        from_attributes = True
+
+
 class APIResponse(BaseModel):
     """Generic API response model for errors"""
     detail: str

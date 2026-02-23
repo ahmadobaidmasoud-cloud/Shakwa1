@@ -5,7 +5,7 @@ from typing import Optional
 import logging
 
 from app.db.session import get_db
-from app.schemas.ticket import TicketCreate, TicketOut, APIResponse
+from app.schemas.ticket import TicketCreate, TicketOut, TicketPublicOut, APIResponse
 from app.schemas.ticket_configuration import TicketConfigurationOut
 from app.crud import ticket as crud_ticket
 from app.crud import ticket_configuration as crud_ticket_config
@@ -13,6 +13,8 @@ from app.crud import tenant as crud_tenant
 from app.models.tenant import Tenant
 from app.core.speechmatics import generate_speechmatics_token
 from app.core.ticket_process import process_ticket_in_background
+from app.core.email import email_service
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -79,7 +81,20 @@ async def create_ticket_public(
             ticket_id=ticket.id, 
             tenant_id=tenant.id
         )
-        
+
+        # Send confirmation email in background (non-blocking)
+        if ticket.email:
+            ticket_url = f"{settings.FRONTEND_URL}/p/{tenant_slug or str(tenant.id)}/ticket/{ticket.id}"
+            background_tasks.add_task(
+                email_service.send_ticket_confirmation_email,
+                to_email=ticket.email,
+                first_name=ticket.first_name,
+                ticket_id=str(ticket.id),
+                tenant_slug=tenant_slug or str(tenant.id),
+                ticket_url=ticket_url,
+            )
+            logger.info(f"Ticket confirmation email queued for {ticket.email}")
+
         logger.info(f"Ticket {ticket.id} created, background processing queued")
         return ticket
     except ValueError as exc:
@@ -128,6 +143,41 @@ async def get_ticket_config_public(
         )
 
     return config
+
+
+@router.get(
+    "/tickets/{ticket_id}",
+    response_model=TicketPublicOut,
+    status_code=status.HTTP_200_OK,
+    tags=["Public - Tickets"],
+    responses={
+        404: {"model": APIResponse, "description": "Ticket not found"},
+    },
+)
+async def get_ticket_public(
+    ticket_id: UUID,
+    tenant_slug: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Get a ticket's public-facing info by ID and tenant slug.
+    Used for submitters to track their ticket status.
+    """
+    tenant = crud_tenant.get_tenant_by_slug(db, tenant_slug)
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found",
+        )
+
+    ticket = crud_ticket.get_ticket_by_id_in_tenant(db, ticket_id, tenant.id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    return ticket
 
 
 @router.get(

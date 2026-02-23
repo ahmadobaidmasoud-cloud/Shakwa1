@@ -14,6 +14,8 @@ from app.schemas.ticket import TicketOut, TicketDetailOut, TicketUpdate, TicketS
 from app.schemas.ticket_assignment import AssignTicketRequest, TicketAssignmentOut
 from app.crud import ticket as crud_ticket
 from app.crud import ticket_assignment as crud_assignment
+from app.services.assignment import auto_assign_ticket
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -169,13 +171,13 @@ async def get_tenant_ticket(
         notes=assignment.notes,
     ) if assignment else None
     
-    # Fetch submissions if ticket status is "processed"
+    # Always fetch submissions when they exist
     submissions_list = None
-    if ticket.status == "processed":
-        submissions = db.query(TicketSubmission).filter(
-            TicketSubmission.ticket_id == ticket_id
-        ).order_by(TicketSubmission.created_at.asc()).all()
-        
+    submissions = db.query(TicketSubmission).filter(
+        TicketSubmission.ticket_id == ticket_id
+    ).order_by(TicketSubmission.created_at.asc()).all()
+    
+    if submissions:
         submissions_list = []
         for submission in submissions:
             # Get submitter user name
@@ -242,6 +244,14 @@ async def update_tenant_ticket(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ticket not found",
         )
+
+    # Stop SLA timer when ticket moves to a terminal/processed status
+    if ticket_data.status in [TicketStatus.DONE, TicketStatus.PROCESSED, TicketStatus.INCOMPLETE]:
+        try:
+            from app.core.redis_utils import stop_sla_timer
+            stop_sla_timer(str(ticket_id))
+        except Exception:
+            pass  # Redis not available is non-fatal
 
     return ticket
 
@@ -332,6 +342,15 @@ async def assign_ticket(
         notes=assignment_data.notes
     )
 
+    # Start SLA timer for the manual assignment
+    try:
+        from app.core.redis_utils import start_sla_timer
+        from app.services.assignment import get_tenant_sla_minutes
+        sla_minutes = get_tenant_sla_minutes(db, current_user.tenant_id)
+        start_sla_timer(str(ticket_id), str(assignment_data.assigned_to_user_id), sla_minutes)
+    except Exception:
+        pass  # Redis not available is non-fatal
+
     return assignment
 
 
@@ -387,3 +406,50 @@ async def get_ticket_assignment_history(
         ))
     
     return result
+
+
+@router.post(
+    "/tickets/{ticket_id}/auto-assign",
+    response_model=TicketAssignmentOut,
+    status_code=status.HTTP_200_OK,
+    tags=["Admin - Tickets"],
+    responses={
+        400: {"model": APIResponse, "description": "No eligible agents or ticket not queued"},
+        403: {"model": APIResponse, "description": "Not authorized for admin"},
+        404: {"model": APIResponse, "description": "Ticket not found"},
+    },
+)
+async def auto_assign_ticket_endpoint(
+    ticket_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """Automatically assign a ticket to the least-loaded eligible agent (Admin only)."""
+    if not current_user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant context missing for current user",
+        )
+
+    # Verify ticket belongs to the tenant
+    ticket = crud_ticket.get_ticket_by_id_in_tenant(db, ticket_id, current_user.tenant_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    assignment = auto_assign_ticket(
+        db=db,
+        ticket_id=ticket_id,
+        tenant_id=current_user.tenant_id,
+        assigned_by_user_id=current_user.id,
+    )
+
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No eligible agents found or ticket is not in queued status",
+        )
+
+    return assignment

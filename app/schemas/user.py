@@ -48,6 +48,22 @@ class TenantUserCreate(BaseModel):
     role: UserRole = Field(default=UserRole.user)
     manager_id: Optional[UUID] = None
     category_id: Optional[int] = None
+    is_accepting_tickets: bool = Field(default=True, description="Whether the user is accepting tickets")
+    capacity: int = Field(default=10, ge=0, description="Maximum number of tickets the user can handle")
+
+
+class UserUpdate(BaseModel):
+    """User update schema (for editing existing users)"""
+    first_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    last_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    role: Optional[UserRole] = None
+    manager_id: Optional[UUID] = None
+    category_id: Optional[int] = None
+    is_accepting_tickets: Optional[bool] = None
+    capacity: Optional[int] = Field(None, ge=0)
+
+    class Config:
+        from_attributes = True
 
 
 class PasswordChangeRequest(BaseModel):
@@ -77,6 +93,17 @@ class CategoryBrief(BaseModel):
 
 # ============= RESPONSE SCHEMAS =============
 
+class ManagerBrief(BaseModel):
+    """Brief manager information for user response"""
+    id: UUID
+    first_name: str
+    last_name: str
+    username: str
+
+    class Config:
+        from_attributes = True
+
+
 class UserOut(BaseModel):
     """User response schema"""
     id: UUID
@@ -86,10 +113,13 @@ class UserOut(BaseModel):
     last_name: str
     role: UserRole
     is_active: bool
+    is_accepting_tickets: bool
+    capacity: int
     tenant_id: Optional[UUID] = None
     manager_id: Optional[UUID] = None
     category_id: Optional[int] = None
     category: Optional[CategoryBrief] = None
+    manager: Optional[ManagerBrief] = None
     created_at: datetime
     updated_at: datetime
 

@@ -21,7 +21,24 @@ services:
     networks:
       - shakwa_network
 
-  # FastAPI Application
+  # Redis for SLA timers
+  redis:
+    image: redis:7-alpine
+    container_name: shakwa_redis
+    command: redis-server --notify-keyspace-events Ex
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shakwa_network
+
+  # FastAPI Application + SLA Monitor
   api:
     build: .
     container_name: shakwa_api
@@ -41,17 +58,24 @@ services:
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Shakwa}
       SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL}
       FRONTEND_URL: ${FRONTEND_URL}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      SLA_DEFAULT_MINUTES: ${SLA_DEFAULT_MINUTES:-30}
     ports:
       - "8000:8000"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - .:/app
     command: >
       sh -c "
       alembic upgrade head &&
-      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      supervisord -c /etc/supervisor/conf.d/supervisord.conf
       "
     networks:
       - shakwa_network
@@ -59,6 +83,7 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
 
 networks:
   shakwa_network:

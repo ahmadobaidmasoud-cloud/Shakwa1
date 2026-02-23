@@ -20,10 +20,190 @@ from typing import Optional
 router = APIRouter()
 
 
+@router.get(
+    "/members",
+    status_code=status.HTTP_200_OK,
+    tags=["User - Members"],
+    responses={
+        403: {"model": APIResponse, "description": "Not authorized"},
+    },
+)
+async def get_managed_members(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get the list of users directly managed by the current manager,
+    including each member's currently assigned ticket count and capacity.
+    Only accessible by users with role 'manager'.
+    """
+    role_value = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    if role_value not in ["manager", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only managers can access this endpoint",
+        )
+
+    if not current_user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant context missing for current user",
+        )
+
+    # Get direct reports of this manager
+    direct_reports = db.query(User).filter(
+        User.manager_id == current_user.id,
+        User.tenant_id == current_user.tenant_id,
+    ).all()
+
+    result = []
+    for member in direct_reports:
+        # Count only ACTIVE tickets (not processed/done) — these consume capacity
+        assigned_ticket_count = (
+            db.query(TicketAssignment)
+            .join(Ticket, TicketAssignment.ticket_id == Ticket.id)
+            .filter(
+                TicketAssignment.assigned_to_user_id == member.id,
+                TicketAssignment.is_current == True,
+                Ticket.status.notin_(["processed", "done", "incomplete"]),
+            )
+            .count()
+        )
+
+        result.append({
+            "id": str(member.id),
+            "first_name": member.first_name,
+            "last_name": member.last_name,
+            "email": member.email,
+            "role": member.role.value if hasattr(member.role, "value") else str(member.role),
+            "is_active": member.is_active,
+            "capacity": member.capacity,
+            "assigned_tickets_count": assigned_ticket_count,
+        })
+
+    return result
+
+
+
 class TicketSubmissionRequest(BaseModel):
     """Request schema for submitting a ticket for completion"""
     comment: str
     attachment_url: Optional[str] = None
+
+
+class ApproveTicketRequest(BaseModel):
+    """Request schema for manager ticket approval (comment is optional)"""
+    comment: Optional[str] = None
+
+
+
+@router.post(
+    "/tickets/{ticket_id}/approve",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    tags=["User - Tickets"],
+    responses={
+        403: {"model": APIResponse, "description": "Not authorized"},
+        404: {"model": APIResponse, "description": "Ticket not found"},
+        400: {"model": APIResponse, "description": "Ticket not in processable state"},
+    },
+)
+async def approve_ticket(
+    ticket_id: UUID,
+    body: ApproveTicketRequest = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Manager approves a processed ticket submitted by one of their team members.
+    Sets ticket status to 'done' and records a manager_approval submission.
+    Only callable by managers, and only for tickets assigned to their direct reports.
+    """
+    from datetime import datetime
+
+    role_value = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    if role_value not in ["manager", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only managers can approve tickets",
+        )
+
+    if not current_user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant context missing for current user",
+        )
+
+    # Fetch the ticket
+    ticket = db.query(Ticket).filter(
+        Ticket.id == ticket_id,
+        Ticket.tenant_id == current_user.tenant_id,
+    ).first()
+
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    if ticket.status.value not in ["processed"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Ticket must be in 'processed' status to approve. Current status: {ticket.status.value}",
+        )
+
+    # Verify the ticket is currently assigned to a direct report of this manager
+    current_assignment = db.query(TicketAssignment).filter(
+        TicketAssignment.ticket_id == ticket_id,
+        TicketAssignment.is_current == True,
+    ).first()
+
+    if not current_assignment:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No current assignment found for this ticket",
+        )
+
+    direct_report_ids = _get_direct_report_ids(db, current_user.id)
+    if current_assignment.assigned_to_user_id not in direct_report_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only approve tickets assigned to your direct reports",
+        )
+
+    now = datetime.utcnow().isoformat()
+
+    # Record approval as a submission entry
+    from app.crud import ticket_submission as crud_submission
+    approval_comment = (body.comment.strip() if body and body.comment and body.comment.strip() else "Approved by manager")
+    crud_submission.create_ticket_submission(
+        db=db,
+        ticket_id=ticket_id,
+        submitted_by_user_id=current_user.id,
+        comment=approval_comment,
+        submission_type="manager_approval",
+    )
+
+    # Mark ticket as done
+    ticket.status = "done"
+    ticket.updated_at = now
+    db.commit()
+    db.refresh(ticket)
+
+    return {
+        "success": True,
+        "message": "Ticket approved",
+        "ticket_id": str(ticket.id),
+        "status": ticket.status.value if hasattr(ticket.status, "value") else str(ticket.status),
+        "approved_by": str(current_user.id),
+        "approved_at": now,
+    }
+
+
+def _get_direct_report_ids(db: Session, manager_id: UUID) -> list:
+    """Get IDs of users directly reporting to this manager (one level only)."""
+    reports = db.query(User).filter(User.manager_id == manager_id).all()
+    return [r.id for r in reports]
 
 
 @router.post(
@@ -332,15 +512,14 @@ async def get_assigned_ticket(
     
     assigned_user_name = f"{assigned_user.first_name} {assigned_user.last_name}".strip() if assigned_user else None
     
-    # If ticket is processed, fetch submissions
+    # Always fetch submissions when they exist
+    from app.models.ticket_submission import TicketSubmission
     submissions_list = None
-    if ticket.status == "processed":
-        from app.models.ticket_submission import TicketSubmission
-        submissions = db.query(TicketSubmission).filter(
-            TicketSubmission.ticket_id == ticket_id
-        ).order_by(TicketSubmission.created_at.asc()).all()
-        
-        # Enrich with user names
+    submissions = db.query(TicketSubmission).filter(
+        TicketSubmission.ticket_id == ticket_id
+    ).order_by(TicketSubmission.created_at.asc()).all()
+    
+    if submissions:
         submissions_list = []
         for submission in submissions:
             submitter = db.query(User).filter(User.id == submission.submitted_by_user_id).first()

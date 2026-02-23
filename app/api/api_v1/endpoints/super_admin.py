@@ -70,6 +70,7 @@ async def create_tenant(
     # Create tenant first (just the org_name, admin creation is done separately)
     db_tenant = Tenant(
         org_name=tenant_data.org_name,
+        slug=crud_tenant.generate_slug(tenant_data.org_name),
         is_active=True,
     )
     db.add(db_tenant)
@@ -150,6 +151,52 @@ async def list_tenants(
 
 
 @router.get(
+    "/tenants/{tenant_id}/details",
+    status_code=status.HTTP_200_OK,
+    tags=["Super Admin - Tenants"],
+    responses={
+        403: {"model": APIResponse, "description": "Not authorized for super admin"},
+        404: {"model": APIResponse, "description": "Tenant not found"},
+    }
+)
+async def get_tenant_details(
+    tenant_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_Super_admin)
+):
+    """
+    Get detailed stats for a specific tenant (Super Admin only).
+
+    Returns:
+    - managers_count: number of users with role 'manager'
+    - users_count: number of users with role 'user'
+    - tickets_count: total tickets submitted for the tenant
+    """
+    from app.models.user import UserRole
+    from app.crud import ticket as crud_ticket
+
+    tenant = crud_tenant.get_tenant_by_id(db, tenant_id)
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found"
+        )
+
+    managers_count = crud_user.count_users_by_role_in_tenant(db, tenant_id, UserRole.manager)
+    users_count = crud_user.count_users_by_role_in_tenant(db, tenant_id, UserRole.user)
+    tickets_count = crud_ticket.count_tickets_by_tenant(db, tenant_id)
+
+    return {
+        "tenant_id": str(tenant.id),
+        "org_name": tenant.org_name,
+        "is_active": tenant.is_active,
+        "managers_count": managers_count,
+        "users_count": users_count,
+        "tickets_count": tickets_count,
+    }
+
+
+@router.get(
     "/tenants/{tenant_id}",
     response_model=TenantOut,
     status_code=status.HTTP_200_OK,
@@ -166,10 +213,10 @@ async def get_tenant(
 ):
     """
     Get a specific tenant by ID (Super Admin only).
-    
+
     Args:
     - **tenant_id**: UUID of the tenant
-    
+
     Returns:
     - Tenant object
     """
@@ -263,6 +310,7 @@ async def delete_tenant(
     
     crud_tenant.delete_tenant(db, tenant_id)
     return None
+
 
 
 # ============= STATISTICS ENDPOINTS =============

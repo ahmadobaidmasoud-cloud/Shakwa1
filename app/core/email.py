@@ -155,5 +155,104 @@ class EmailService:
         )
 
 
+    def send_ticket_confirmation_email(
+        self,
+        to_email: str,
+        first_name: str,
+        ticket_id: str,
+        tenant_slug: str,
+        ticket_url: str,
+    ) -> bool:
+        """
+        Send a ticket submission confirmation email to the person who submitted it.
+
+        Args:
+            to_email: Submitter email address
+            first_name: Submitter's first name
+            ticket_id: The UUID of the newly created ticket
+            tenant_slug: Tenant slug (for display)
+            ticket_url: Full URL to the public ticket tracker page
+
+        Returns:
+            True if email sent successfully
+        """
+        short_id = str(ticket_id).split("-")[0].upper()
+
+        html_content = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f7;">
+                <div style="max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+
+                    <!-- Header -->
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 32px 40px;">
+                        <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 700; letter-spacing: -0.3px;">
+                            Ticket Received ✓
+                        </h1>
+                        <p style="margin: 6px 0 0; color: rgba(255,255,255,0.85); font-size: 14px;">
+                            We've got your request and will be in touch soon.
+                        </p>
+                    </div>
+
+                    <!-- Body -->
+                    <div style="padding: 32px 40px;">
+                        <p style="margin: 0 0 16px;">Hi <strong>{first_name}</strong>,</p>
+
+                        <p style="margin: 0 0 24px; color: #555;">
+                            Your ticket has been successfully submitted. Our team will review it and get back to you as soon as possible.
+                        </p>
+
+                        <!-- Ticket Info Box -->
+                        <div style="background: #f8f8fc; border-left: 4px solid #667eea; border-radius: 4px; padding: 16px 20px; margin-bottom: 28px;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                                <tr>
+                                    <td style="padding: 4px 0; color: #888; width: 120px;">Ticket ID</td>
+                                    <td style="padding: 4px 0; font-weight: 600; color: #333;">#{short_id}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 4px 0; color: #888;">Status</td>
+                                    <td style="padding: 4px 0;">
+                                        <span style="display: inline-block; background: #eef0ff; color: #667eea; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 20px;">
+                                            Queued
+                                        </span>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+
+                        <!-- CTA Button -->
+                        <div style="text-align: center; margin: 28px 0;">
+                            <a href="{ticket_url}"
+                               style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 13px 32px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600; font-size: 15px; letter-spacing: 0.2px;">
+                                Track Your Ticket
+                            </a>
+                        </div>
+
+                        <p style="margin: 24px 0 0; font-size: 13px; color: #888;">
+                            Or copy this link into your browser:<br>
+                            <a href="{ticket_url}" style="color: #667eea; word-break: break-all;">{ticket_url}</a>
+                        </p>
+                    </div>
+
+                    <!-- Footer -->
+                    <div style="padding: 20px 40px; border-top: 1px solid #eeeeee; text-align: center;">
+                        <p style="margin: 0; color: #aaa; font-size: 12px;">
+                            You received this email because you submitted a ticket.<br>
+                            &copy; {__import__('datetime').date.today().year} <strong>Shakwa</strong>. All rights reserved.
+                        </p>
+                    </div>
+
+                </div>
+            </body>
+        </html>
+        """
+
+        return self.send_email(
+            to_email=to_email,
+            subject=f"Ticket #{short_id} Received – We're on it!",
+            html_content=html_content,
+        )
+
+
 # Create a singleton instance
 email_service = EmailService()
+

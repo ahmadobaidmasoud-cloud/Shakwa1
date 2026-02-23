@@ -69,6 +69,13 @@ def submit_ticket_for_completion(
     
     db.commit()
     db.refresh(ticket)
+
+    # Stop the SLA timer since ticket moved to processed
+    try:
+        from app.core.redis_utils import stop_sla_timer
+        stop_sla_timer(str(ticket_id))
+    except Exception:
+        pass  # Redis not available is non-fatal
     
     return {
         "success": True,

@@ -46,6 +46,15 @@ def get_users_by_tenant(db: Session, tenant_id: UUID, skip: int = 0, limit: int 
     )
 
 
+def count_users_by_role_in_tenant(db: Session, tenant_id: UUID, role: UserRole) -> int:
+    """Count users of a specific role within a tenant"""
+    return (
+        db.query(User)
+        .filter(User.tenant_id == tenant_id, User.role == role)
+        .count()
+    )
+
+
 def create_user(db: Session, user_data: UserRegisterRequest) -> User:
     """Create a new user"""
     hashed_password = get_password_hash(user_data.password)
@@ -72,6 +81,10 @@ def create_user_in_tenant(db: Session, tenant_id: UUID, user_data: TenantUserCre
     if get_user_by_username(db, user_data.username):
         raise ValueError("Username already taken")
 
+    role_value = user_data.role.value if hasattr(user_data.role, "value") else str(user_data.role)
+    if role_value not in ["manager", "user"]:
+        raise ValueError("Role must be manager or user")
+
     # Validate manager if provided
     if user_data.manager_id:
         manager = get_user_by_id_in_tenant(db, user_data.manager_id, tenant_id)
@@ -82,9 +95,28 @@ def create_user_in_tenant(db: Session, tenant_id: UUID, user_data: TenantUserCre
         if manager_role not in ["admin", "manager"]:
             raise ValueError("Manager must have role admin or manager")
 
-    role_value = user_data.role.value if hasattr(user_data.role, "value") else str(user_data.role)
-    if role_value not in ["manager", "user"]:
-        raise ValueError("Role must be manager or user")
+        # ── Category uniqueness for sub-managers ────────────────────
+        # Each manager can only have ONE sub-manager per category
+        if role_value == "manager" and user_data.category_id:
+            existing_sub = db.query(User).filter(
+                User.manager_id == user_data.manager_id,
+                User.tenant_id == tenant_id,
+                User.role == UserRole.manager,
+                User.category_id == user_data.category_id,
+            ).first()
+            if existing_sub:
+                raise ValueError(
+                    f"This manager already has a sub-manager for the selected category. "
+                    f"Each manager can only have one sub-manager per category."
+                )
+
+        # ── Employees must share their manager's category ───────────
+        if role_value == "user" and user_data.category_id:
+            mgr_category = manager.category_id
+            if mgr_category and mgr_category != user_data.category_id:
+                raise ValueError(
+                    "Employee must belong to the same category as their manager"
+                )
 
     hashed_password = get_password_hash(user_data.password)
     db_user = User(
@@ -98,6 +130,8 @@ def create_user_in_tenant(db: Session, tenant_id: UUID, user_data: TenantUserCre
         manager_id=user_data.manager_id,
         category_id=user_data.category_id,
         is_active=True,
+        is_accepting_tickets=user_data.is_accepting_tickets,
+        capacity=user_data.capacity,
     )
     db.add(db_user)
     db.commit()

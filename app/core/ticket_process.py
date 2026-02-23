@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy.orm import Session
@@ -88,6 +89,22 @@ def process_ticket_in_background(db: Session, ticket_id: UUID, tenant_id: UUID):
             crud_ticket.update_ticket(db, ticket_id, tenant_id, update_data)
             logger.info(f"Ticket {ticket_id} enriched successfully")
         
+        # Auto-assign ticket to the least-loaded eligible agent
+        logger.info(f"Starting auto-assignment for ticket {ticket_id}")
+        try:
+            from app.services.assignment import auto_assign_ticket
+            assignment = auto_assign_ticket(
+                db=db,
+                ticket_id=ticket_id,
+                tenant_id=tenant_id,
+            )
+            if assignment:
+                logger.info(f"Ticket {ticket_id} auto-assigned to user {assignment.assigned_to_user_id}")
+            else:
+                logger.warning(f"Ticket {ticket_id} could not be auto-assigned (no eligible agents)")
+        except Exception as e:
+            logger.error(f"Error auto-assigning ticket {ticket_id}: {str(e)}")
+        
     except Exception as e:
         logger.error(f"Error processing ticket {ticket_id}: {str(e)}")
 
@@ -138,33 +155,40 @@ TICKET DESCRIPTION:
 {description}
 """
 
-    try:
-        messages = [
-            {
-                'role': 'user',
-                'content': prompt_content
-            },
-        ]
-        
-        resp_text = ""
-        for part in client.chat(OLLAMA_MODEL, messages=messages, stream=True):
-            resp_text += part['message']['content']
-        
-        logger.info(f"Ollama response: {resp_text[:200]}...")
-        
-        resp_json = json.loads(resp_text)
-        return {
-            "Title": resp_json.get("Title"),
-            "Summary": resp_json.get("Summary"),
-            "TranslatedText": resp_json.get("TranslatedText"),
-            "CategoryName": resp_json.get("Category"),
-        }
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse Ollama JSON response: {str(e)}")
-        return None
-    except Exception as e:
-        logger.error(f"Error calling Ollama: {str(e)}")
-        return None
+    messages = [
+        {
+            'role': 'user',
+            'content': prompt_content
+        },
+    ]
+
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp_text = ""
+            for part in client.chat(OLLAMA_MODEL, messages=messages, stream=True):
+                resp_text += part['message']['content']
+            
+            logger.info(f"Ollama response: {resp_text[:200]}...")
+            
+            resp_json = json.loads(resp_text)
+            return {
+                "Title": resp_json.get("Title"),
+                "Summary": resp_json.get("Summary"),
+                "TranslatedText": resp_json.get("TranslatedText"),
+                "CategoryName": resp_json.get("Category"),
+            }
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Ollama JSON response: {str(e)}")
+            return None
+        except Exception as e:
+            if attempt < max_retries:
+                wait = 2 ** attempt  # 2s, 4s
+                logger.warning(f"Ollama call failed (attempt {attempt}/{max_retries}): {str(e)}. Retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                logger.error(f"Ollama call failed after {max_retries} attempts: {str(e)}")
+                return None
 
 
 def get_gemini_result(ticket, departments, target_language="Arabic"):
@@ -217,22 +241,32 @@ def get_gemini_result(ticket, departments, target_language="Arabic"):
         },
     ]
 
-    try:
-        resp_text = ""
-        for part in client.chat(OLLAMA_MODEL, messages=messages, stream=True):
-            resp_text += part['message']['content']
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp_text = ""
+            for part in client.chat(OLLAMA_MODEL, messages=messages, stream=True):
+                resp_text += part['message']['content']
 
-        resp_json = json.loads(resp_text)
-        result = {
-            "email_body": ticket,
-            "Title": resp_json.get("Title"),
-            "Summary": resp_json.get("Summary"),
-            "TranslatedText": resp_json.get("TranslatedText"),
-            "Language": target_language,
-            "Department": resp_json.get("Department"),
-            "Priority": resp_json.get("Priority")
-        }
-        return result
-    except json.JSONDecodeError:
-        logger.error("Failed to parse JSON response")
-        return None
+            resp_json = json.loads(resp_text)
+            result = {
+                "email_body": ticket,
+                "Title": resp_json.get("Title"),
+                "Summary": resp_json.get("Summary"),
+                "TranslatedText": resp_json.get("TranslatedText"),
+                "Language": target_language,
+                "Department": resp_json.get("Department"),
+                "Priority": resp_json.get("Priority")
+            }
+            return result
+        except json.JSONDecodeError:
+            logger.error("Failed to parse JSON response")
+            return None
+        except Exception as e:
+            if attempt < max_retries:
+                wait = 2 ** attempt
+                logger.warning(f"Ollama call failed (attempt {attempt}/{max_retries}): {str(e)}. Retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                logger.error(f"Ollama call failed after {max_retries} attempts: {str(e)}")
+                return None

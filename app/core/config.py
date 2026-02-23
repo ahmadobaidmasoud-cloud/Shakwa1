@@ -40,10 +40,20 @@ class Settings(BaseSettings):
 
     OLLAMA_API_KEY: Optional[str] = None
 
+    # Redis Configuration (for SLA timers)
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: Optional[str] = None
+    SLA_DEFAULT_MINUTES: int = 3
+
+    # How often the assignment retry worker polls for unassigned queued tickets (seconds)
+    ASSIGNMENT_RETRY_INTERVAL_SECONDS: int = 60
+
     class Config:
         env_file = ".env"
         extra = "allow"
 
 
 settings = Settings()
-print("Loaded settings:", settings.dict())
+# print("Loaded settings:", settings.dict())
