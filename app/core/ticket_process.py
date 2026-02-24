@@ -9,26 +9,24 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Optional Ollama integration
+# OpenAI integration
 try:
-    from ollama import Client
-    OLLAMA_AVAILABLE = True
-    OLLAMA_MODEL = "gpt-oss:20b"
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
 except ImportError:
-    OLLAMA_AVAILABLE = False
-    logger.warning("Ollama not available - ticket enrichment will be limited")
+    OPENAI_AVAILABLE = False
+    logger.warning("OpenAI not available - ticket enrichment will be limited")
+
+OPENAI_MODEL = "gpt-4o"
 
 
-def get_ollama_client():
-    """Initialize and return Ollama client"""
-    if not OLLAMA_AVAILABLE:
+def get_openai_client():
+    """Initialize and return OpenAI client"""
+    if not OPENAI_AVAILABLE:
         return None
-    if not settings.OLLAMA_API_KEY:
+    if not settings.OPENAI_API_KEY:
         return None
-    return Client(
-        host="https://ollama.com",
-        headers={'Authorization': 'Bearer ' + settings.OLLAMA_API_KEY}
-    )
+    return OpenAI(api_key=settings.OPENAI_API_KEY)
 
 
 def process_ticket_in_background(db: Session, ticket_id: UUID, tenant_id: UUID):
@@ -62,7 +60,7 @@ def process_ticket_in_background(db: Session, ticket_id: UUID, tenant_id: UUID):
         # Try to enrich with AI
         enriched_data = {}
         
-        if OLLAMA_AVAILABLE:
+        if OPENAI_AVAILABLE:
             ai_result = generate_ticket_insights(
                 ticket.description,
                 categories=categories
@@ -75,7 +73,7 @@ def process_ticket_in_background(db: Session, ticket_id: UUID, tenant_id: UUID):
                 # Assign category if detected
                 if ai_result.get('CategoryName') and categories:
                     matched_category = next(
-                        (cat for cat in categories if cat.name.lower() == ai_result.get('CategoryName', '').lower()),
+                        (cat for cat in categories if cat.name.lower().strip() == ai_result.get('CategoryName', '').lower().strip()),
                         None
                     )
                     if matched_category:
@@ -111,15 +109,15 @@ def process_ticket_in_background(db: Session, ticket_id: UUID, tenant_id: UUID):
 
 def generate_ticket_insights(description: str, target_language: str = "Arabic", categories=None) -> Optional[Dict[str, Any]]:
     """
-    Generate title, summary, translation, and category suggestion using Ollama
+    Generate title, summary, translation, and category suggestion using OpenAI
     """
-    if not OLLAMA_AVAILABLE:
-        logger.warning("Ollama not available - skipping AI enrichment")
+    if not OPENAI_AVAILABLE:
+        logger.warning("OpenAI not available - skipping AI enrichment")
         return None
     
-    client = get_ollama_client()
+    client = get_openai_client()
     if not client:
-        logger.warning("Ollama client not initialized - skipping AI enrichment")
+        logger.warning("OpenAI client not initialized - skipping AI enrichment")
         return None
     
     # Format categories for the prompt
@@ -166,10 +164,17 @@ TICKET DESCRIPTION:
     for attempt in range(1, max_retries + 1):
         try:
             resp_text = ""
-            for part in client.chat(OLLAMA_MODEL, messages=messages, stream=True):
-                resp_text += part['message']['content']
+            stream = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=messages,
+                stream=True,
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    resp_text += delta.content
             
-            logger.info(f"Ollama response: {resp_text[:200]}...")
+            logger.info(f"OpenAI response: {resp_text[:200]}...")
             
             resp_json = json.loads(resp_text)
             return {
@@ -179,15 +184,15 @@ TICKET DESCRIPTION:
                 "CategoryName": resp_json.get("Category"),
             }
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Ollama JSON response: {str(e)}")
+            logger.error(f"Failed to parse OpenAI JSON response: {str(e)}")
             return None
         except Exception as e:
             if attempt < max_retries:
                 wait = 2 ** attempt  # 2s, 4s
-                logger.warning(f"Ollama call failed (attempt {attempt}/{max_retries}): {str(e)}. Retrying in {wait}s...")
+                logger.warning(f"OpenAI call failed (attempt {attempt}/{max_retries}): {str(e)}. Retrying in {wait}s...")
                 time.sleep(wait)
             else:
-                logger.error(f"Ollama call failed after {max_retries} attempts: {str(e)}")
+                logger.error(f"OpenAI call failed after {max_retries} attempts: {str(e)}")
                 return None
 
 
@@ -227,10 +232,10 @@ def get_gemini_result(ticket, departments, target_language="Arabic"):
             {ticket}
             """
 
-    if not OLLAMA_AVAILABLE:
+    if not OPENAI_AVAILABLE:
         return None
         
-    client = get_ollama_client()
+    client = get_openai_client()
     if not client:
         return None
     
@@ -245,8 +250,15 @@ def get_gemini_result(ticket, departments, target_language="Arabic"):
     for attempt in range(1, max_retries + 1):
         try:
             resp_text = ""
-            for part in client.chat(OLLAMA_MODEL, messages=messages, stream=True):
-                resp_text += part['message']['content']
+            stream = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=messages,
+                stream=True,
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    resp_text += delta.content
 
             resp_json = json.loads(resp_text)
             result = {
@@ -265,8 +277,9 @@ def get_gemini_result(ticket, departments, target_language="Arabic"):
         except Exception as e:
             if attempt < max_retries:
                 wait = 2 ** attempt
-                logger.warning(f"Ollama call failed (attempt {attempt}/{max_retries}): {str(e)}. Retrying in {wait}s...")
+                logger.warning(f"OpenAI call failed (attempt {attempt}/{max_retries}): {str(e)}. Retrying in {wait}s...")
                 time.sleep(wait)
             else:
-                logger.error(f"Ollama call failed after {max_retries} attempts: {str(e)}")
+                logger.error(f"OpenAI call failed after {max_retries} attempts: {str(e)}")
                 return None
+

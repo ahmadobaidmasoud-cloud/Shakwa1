@@ -165,7 +165,7 @@ async def approve_ticket(
         )
 
     direct_report_ids = _get_direct_report_ids(db, current_user.id)
-    if current_assignment.assigned_to_user_id not in direct_report_ids:
+    if role_value != "admin" and current_assignment.assigned_to_user_id not in direct_report_ids:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only approve tickets assigned to your direct reports",

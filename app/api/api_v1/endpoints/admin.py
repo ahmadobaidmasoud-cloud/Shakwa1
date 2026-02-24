@@ -95,7 +95,30 @@ async def list_tenant_users(
             detail="Tenant context missing for current user",
         )
 
-    return crud_user.get_users_by_tenant(db, current_user.tenant_id, skip=skip, limit=limit)
+    from app.models.ticket import Ticket
+    from app.models.ticket_assignment import TicketAssignment
+    from app.schemas.user import UserOut as UserOutSchema
+
+    users = crud_user.get_users_by_tenant(db, current_user.tenant_id, skip=skip, limit=limit)
+
+    # Enrich each user with their current active ticket count
+    enriched = []
+    for user in users:
+        count = (
+            db.query(TicketAssignment)
+            .join(Ticket, TicketAssignment.ticket_id == Ticket.id)
+            .filter(
+                TicketAssignment.assigned_to_user_id == user.id,
+                TicketAssignment.is_current == True,
+                Ticket.status.notin_(["processed", "done", "incomplete"]),
+            )
+            .count()
+        )
+        out = UserOutSchema.model_validate(user)
+        out.assigned_tickets_count = count
+        enriched.append(out)
+
+    return enriched
 
 
 @router.get(

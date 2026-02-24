@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, and_
+from datetime import datetime
 
 from app.db.session import get_db
 from app.api.deps import get_current_admin
@@ -8,6 +9,7 @@ from app.models.user import User, UserRole
 from app.models.ticket import Ticket, TicketStatus
 from app.models.category import Category
 from app.models.ticket_assignment import TicketAssignment
+from app.models.ticket_submission import TicketSubmission
 
 router = APIRouter()
 
@@ -96,7 +98,7 @@ async def get_dashboard_stats(
             User.first_name,
             User.last_name,
             User.capacity,
-            func.count(TicketAssignment.id).label("active_tickets"),
+            func.count(Ticket.id).label("active_tickets"),
         )
         .outerjoin(
             TicketAssignment,
@@ -147,6 +149,58 @@ async def get_dashboard_stats(
         for t in recent_tickets_rows
     ]
 
+    # ── Employee performance ─────────────────────────────────────────
+    # Employees who submitted a ticket (have a ticket_submission entry).
+    # Handling time = assignment assigned_at → submission created_at.
+    completed_rows = (
+        db.query(
+            TicketSubmission.submitted_by_user_id,
+            TicketAssignment.assigned_at,
+            TicketSubmission.created_at.label("submitted_at"),
+        )
+        .join(Ticket, Ticket.id == TicketSubmission.ticket_id)
+        .join(
+            TicketAssignment,
+            and_(
+                TicketAssignment.ticket_id == TicketSubmission.ticket_id,
+                TicketAssignment.assigned_to_user_id == TicketSubmission.submitted_by_user_id,
+            ),
+        )
+        .filter(
+            Ticket.tenant_id == tenant_id,
+        )
+        .all()
+    )
+
+    # Group by user
+    from collections import defaultdict
+    perf_map = defaultdict(lambda: {"completed": 0, "total_minutes": 0.0})
+    for user_id, assigned_at, submitted_at in completed_rows:
+        try:
+            t_start = datetime.fromisoformat(str(assigned_at))
+            t_end = datetime.fromisoformat(str(submitted_at))
+            diff_minutes = (t_end - t_start).total_seconds() / 60.0
+        except Exception:
+            diff_minutes = 0.0
+        perf_map[user_id]["completed"] += 1
+        perf_map[user_id]["total_minutes"] += diff_minutes
+
+    # Resolve user names
+    employee_ids = list(perf_map.keys())
+    employee_performance = []
+    if employee_ids:
+        employees = db.query(User).filter(User.id.in_(employee_ids)).all()
+        user_name_map = {u.id: f"{u.first_name} {u.last_name}".strip() for u in employees}
+        for uid, data in perf_map.items():
+            avg_min = data["total_minutes"] / data["completed"] if data["completed"] else 0
+            employee_performance.append({
+                "id": str(uid),
+                "name": user_name_map.get(uid, "Unknown"),
+                "completed_tickets": data["completed"],
+                "avg_handling_minutes": round(avg_min, 1),
+            })
+        employee_performance.sort(key=lambda x: x["completed_tickets"], reverse=True)
+
     return {
         "total_categories": total_categories,
         "total_tickets": total_tickets,
@@ -156,4 +210,5 @@ async def get_dashboard_stats(
         "users_by_role": users_by_role,
         "top_agents": top_agents,
         "recent_tickets": recent_tickets,
+        "employee_performance": employee_performance,
     }

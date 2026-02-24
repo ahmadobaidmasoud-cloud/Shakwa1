@@ -117,6 +117,19 @@ class TicketSubmissionBrief(BaseModel):
         from_attributes = True
 
 
+class TicketEscalationBrief(BaseModel):
+    """Brief escalation record for ticket detail"""
+    id: UUID
+    escalated_from_user_name: Optional[str] = None
+    escalated_to_user_name: Optional[str] = None
+    escalation_level: int
+    reason: Optional[str] = None
+    escalated_at: str
+
+    class Config:
+        from_attributes = True
+
+
 class TicketDetailOut(BaseModel):
     """Detailed ticket schema with full assignment info"""
     id: UUID
@@ -134,6 +147,7 @@ class TicketDetailOut(BaseModel):
     translation: Optional[str] = None
     current_assignment: Optional[CurrentAssignmentDetailed] = None
     submissions: Optional[List[TicketSubmissionBrief]] = None
+    escalations: Optional[List[TicketEscalationBrief]] = None
     created_at: str
     updated_at: str
 

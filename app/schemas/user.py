@@ -115,6 +115,7 @@ class UserOut(BaseModel):
     is_active: bool
     is_accepting_tickets: bool
     capacity: int
+    assigned_tickets_count: Optional[int] = None
     tenant_id: Optional[UUID] = None
     manager_id: Optional[UUID] = None
     category_id: Optional[int] = None

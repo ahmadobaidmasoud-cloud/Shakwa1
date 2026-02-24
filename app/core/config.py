@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # Speechmatics Configuration
     SPEECHMATICS_API_KEY: Optional[str] = None
 
-    OLLAMA_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: Optional[str] = None
 
     # Redis Configuration (for SLA timers)
     REDIS_HOST: str = "localhost"

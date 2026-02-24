@@ -35,7 +35,7 @@ def create_category(
     db_category = Category(
         tenant_id=tenant_id,
         user_id=user_id,
-        name=category_data.name,
+        name=category_data.name.strip(),
         description=category_data.description,
         keywords=category_data.keywords,
     )

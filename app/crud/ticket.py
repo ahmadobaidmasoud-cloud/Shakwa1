@@ -52,7 +52,7 @@ def get_tickets_by_tenant(
     if status:
         query = query.filter(Ticket.status == status)
     
-    return query.offset(skip).limit(limit).all()
+    return query.order_by(Ticket.created_at.desc()).offset(skip).limit(limit).all()
 
 
 def update_ticket(

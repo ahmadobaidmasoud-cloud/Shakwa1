@@ -10,7 +10,7 @@ from app.models.ticket import Ticket
 from app.models.ticket_assignment import TicketAssignment
 from app.models.category import Category
 from app.models.ticket_submission import TicketSubmission
-from app.schemas.ticket import TicketOut, TicketDetailOut, TicketUpdate, TicketStatus, TicketAssignmentHistoryItem, CurrentAssignmentBrief, CurrentAssignmentDetailed, APIResponse, TicketSubmissionBrief
+from app.schemas.ticket import TicketOut, TicketDetailOut, TicketUpdate, TicketStatus, TicketAssignmentHistoryItem, CurrentAssignmentBrief, CurrentAssignmentDetailed, APIResponse, TicketSubmissionBrief, TicketEscalationBrief
 from app.schemas.ticket_assignment import AssignTicketRequest, TicketAssignmentOut
 from app.crud import ticket as crud_ticket
 from app.crud import ticket_assignment as crud_assignment
@@ -194,6 +194,27 @@ async def get_tenant_ticket(
                 created_at=str(submission.created_at),
             ))
     
+    # Fetch escalation history
+    from app.models.ticket_assignment import TicketEscalation
+    escalations_list = None
+    escalations = db.query(TicketEscalation).filter(
+        TicketEscalation.ticket_id == ticket_id
+    ).order_by(TicketEscalation.escalated_at.asc()).all()
+
+    if escalations:
+        escalations_list = []
+        for esc in escalations:
+            from_user = db.query(User).filter(User.id == esc.escalated_from_user_id).first()
+            to_user = db.query(User).filter(User.id == esc.escalated_to_user_id).first()
+            escalations_list.append(TicketEscalationBrief(
+                id=esc.id,
+                escalated_from_user_name=f"{from_user.first_name} {from_user.last_name}".strip() if from_user else None,
+                escalated_to_user_name=f"{to_user.first_name} {to_user.last_name}".strip() if to_user else None,
+                escalation_level=esc.escalation_level,
+                reason=esc.reason,
+                escalated_at=str(esc.escalated_at),
+            ))
+
     return TicketDetailOut(
         id=ticket.id,
         tenant_id=ticket.tenant_id,
@@ -212,6 +233,7 @@ async def get_tenant_ticket(
         created_at=str(ticket.created_at),
         updated_at=str(ticket.updated_at),
         submissions=submissions_list,
+        escalations=escalations_list,
     )
 
 
