@@ -150,8 +150,28 @@ async def get_dashboard_stats(
     ]
 
     # ── Employee performance ─────────────────────────────────────────
-    # Employees who submitted a ticket (have a ticket_submission entry).
-    # Handling time = assignment assigned_at → submission created_at.
+    # 1. Total assignments per user (all assignments, not just current)
+    from collections import defaultdict
+    assignment_count_rows = (
+        db.query(
+            TicketAssignment.assigned_to_user_id,
+            func.count(TicketAssignment.id).label("total_assigned"),
+        )
+        .join(Ticket, Ticket.id == TicketAssignment.ticket_id)
+        .filter(Ticket.tenant_id == tenant_id)
+        .group_by(TicketAssignment.assigned_to_user_id)
+        .all()
+    )
+    assignment_counts = {uid: cnt for uid, cnt in assignment_count_rows}
+
+    # 2. Get tenant SLA for on-time calculation
+    try:
+        from app.services.assignment import get_tenant_sla_minutes
+        sla_minutes = get_tenant_sla_minutes(db, tenant_id)
+    except Exception:
+        sla_minutes = 60  # fallback default
+
+    # 3. Completed submissions with handling time
     completed_rows = (
         db.query(
             TicketSubmission.submitted_by_user_id,
@@ -168,13 +188,13 @@ async def get_dashboard_stats(
         )
         .filter(
             Ticket.tenant_id == tenant_id,
+            TicketSubmission.submission_type == "employee_submission",
         )
         .all()
     )
 
     # Group by user
-    from collections import defaultdict
-    perf_map = defaultdict(lambda: {"completed": 0, "total_minutes": 0.0})
+    perf_map = defaultdict(lambda: {"completed": 0, "on_time": 0, "total_minutes": 0.0})
     for user_id, assigned_at, submitted_at in completed_rows:
         try:
             t_start = datetime.fromisoformat(str(assigned_at))
@@ -184,19 +204,24 @@ async def get_dashboard_stats(
             diff_minutes = 0.0
         perf_map[user_id]["completed"] += 1
         perf_map[user_id]["total_minutes"] += diff_minutes
+        if diff_minutes <= sla_minutes:
+            perf_map[user_id]["on_time"] += 1
 
-    # Resolve user names
-    employee_ids = list(perf_map.keys())
+    # 4. Merge: include all employees who have assignments OR completions
+    all_employee_ids = set(assignment_counts.keys()) | set(perf_map.keys())
     employee_performance = []
-    if employee_ids:
-        employees = db.query(User).filter(User.id.in_(employee_ids)).all()
+    if all_employee_ids:
+        employees = db.query(User).filter(User.id.in_(list(all_employee_ids))).all()
         user_name_map = {u.id: f"{u.first_name} {u.last_name}".strip() for u in employees}
-        for uid, data in perf_map.items():
+        for uid in all_employee_ids:
+            data = perf_map.get(uid, {"completed": 0, "on_time": 0, "total_minutes": 0.0})
             avg_min = data["total_minutes"] / data["completed"] if data["completed"] else 0
             employee_performance.append({
                 "id": str(uid),
                 "name": user_name_map.get(uid, "Unknown"),
+                "total_assigned": assignment_counts.get(uid, 0),
                 "completed_tickets": data["completed"],
+                "completed_on_time": data["on_time"],
                 "avg_handling_minutes": round(avg_min, 1),
             })
         employee_performance.sort(key=lambda x: x["completed_tickets"], reverse=True)
@@ -211,4 +236,99 @@ async def get_dashboard_stats(
         "top_agents": top_agents,
         "recent_tickets": recent_tickets,
         "employee_performance": employee_performance,
+    }
+
+
+@router.get(
+    "/dashboard/user-stats/{user_id}",
+    status_code=status.HTTP_200_OK,
+    tags=["Admin - Dashboard"],
+)
+async def get_user_stats(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """
+    Get performance KPIs for a specific user (Admin only).
+    Returns: total_assigned, completed_tickets, completed_on_time, avg_handling_minutes.
+    """
+    from uuid import UUID as PyUUID
+
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant context missing for current user",
+        )
+
+    uid = PyUUID(user_id)
+
+    # Verify user belongs to this tenant
+    target_user = db.query(User).filter(User.id == uid, User.tenant_id == tenant_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Total assignments
+    total_assigned = (
+        db.query(func.count(TicketAssignment.id))
+        .join(Ticket, Ticket.id == TicketAssignment.ticket_id)
+        .filter(
+            TicketAssignment.assigned_to_user_id == uid,
+            Ticket.tenant_id == tenant_id,
+        )
+        .scalar()
+    ) or 0
+
+    # SLA threshold
+    try:
+        from app.services.assignment import get_tenant_sla_minutes
+        sla_minutes = get_tenant_sla_minutes(db, tenant_id)
+    except Exception:
+        sla_minutes = 60
+
+    # Completed submissions
+    completed_rows = (
+        db.query(
+            TicketAssignment.assigned_at,
+            TicketSubmission.created_at.label("submitted_at"),
+        )
+        .join(Ticket, Ticket.id == TicketSubmission.ticket_id)
+        .join(
+            TicketAssignment,
+            and_(
+                TicketAssignment.ticket_id == TicketSubmission.ticket_id,
+                TicketAssignment.assigned_to_user_id == TicketSubmission.submitted_by_user_id,
+            ),
+        )
+        .filter(
+            TicketSubmission.submitted_by_user_id == uid,
+            Ticket.tenant_id == tenant_id,
+            TicketSubmission.submission_type == "employee_submission",
+        )
+        .all()
+    )
+
+    completed_tickets = 0
+    completed_on_time = 0
+    total_minutes = 0.0
+    for assigned_at, submitted_at in completed_rows:
+        try:
+            t_start = datetime.fromisoformat(str(assigned_at))
+            t_end = datetime.fromisoformat(str(submitted_at))
+            diff_minutes = (t_end - t_start).total_seconds() / 60.0
+        except Exception:
+            diff_minutes = 0.0
+        completed_tickets += 1
+        total_minutes += diff_minutes
+        if diff_minutes <= sla_minutes:
+            completed_on_time += 1
+
+    avg_handling = round(total_minutes / completed_tickets, 1) if completed_tickets else 0
+
+    return {
+        "total_assigned": total_assigned,
+        "completed_tickets": completed_tickets,
+        "completed_on_time": completed_on_time,
+        "avg_handling_minutes": avg_handling,
     }

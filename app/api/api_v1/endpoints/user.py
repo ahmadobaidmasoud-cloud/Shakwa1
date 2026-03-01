@@ -21,6 +21,101 @@ router = APIRouter()
 
 
 @router.get(
+    "/tickets/my-stats",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    tags=["User - Tickets"],
+    responses={
+        403: {"model": APIResponse, "description": "Not authorized"},
+    },
+)
+async def get_my_ticket_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get performance KPIs for the currently logged-in user:
+    total_assigned, completed_tickets, completed_on_time, avg_handling_minutes.
+    """
+    from sqlalchemy import func, and_
+    from datetime import datetime
+    from app.models.ticket_submission import TicketSubmission
+
+    if not current_user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant context missing for current user",
+        )
+
+    uid = current_user.id
+    tenant_id = current_user.tenant_id
+
+    # Total assignments for this user
+    total_assigned = (
+        db.query(func.count(TicketAssignment.id))
+        .join(Ticket, Ticket.id == TicketAssignment.ticket_id)
+        .filter(
+            TicketAssignment.assigned_to_user_id == uid,
+            Ticket.tenant_id == tenant_id,
+        )
+        .scalar()
+    ) or 0
+
+    # SLA threshold
+    try:
+        from app.services.assignment import get_tenant_sla_minutes
+        sla_minutes = get_tenant_sla_minutes(db, tenant_id)
+    except Exception:
+        sla_minutes = 60
+
+    # Completed submissions with handling time
+    completed_rows = (
+        db.query(
+            TicketAssignment.assigned_at,
+            TicketSubmission.created_at.label("submitted_at"),
+        )
+        .join(Ticket, Ticket.id == TicketSubmission.ticket_id)
+        .join(
+            TicketAssignment,
+            and_(
+                TicketAssignment.ticket_id == TicketSubmission.ticket_id,
+                TicketAssignment.assigned_to_user_id == TicketSubmission.submitted_by_user_id,
+            ),
+        )
+        .filter(
+            TicketSubmission.submitted_by_user_id == uid,
+            Ticket.tenant_id == tenant_id,
+            TicketSubmission.submission_type == "employee_submission",
+        )
+        .all()
+    )
+
+    completed_tickets = 0
+    completed_on_time = 0
+    total_minutes = 0.0
+    for assigned_at, submitted_at in completed_rows:
+        try:
+            t_start = datetime.fromisoformat(str(assigned_at))
+            t_end = datetime.fromisoformat(str(submitted_at))
+            diff_minutes = (t_end - t_start).total_seconds() / 60.0
+        except Exception:
+            diff_minutes = 0.0
+        completed_tickets += 1
+        total_minutes += diff_minutes
+        if diff_minutes <= sla_minutes:
+            completed_on_time += 1
+
+    avg_handling = round(total_minutes / completed_tickets, 1) if completed_tickets else 0
+
+    return {
+        "total_assigned": total_assigned,
+        "completed_tickets": completed_tickets,
+        "completed_on_time": completed_on_time,
+        "avg_handling_minutes": avg_handling,
+    }
+
+
+@router.get(
     "/members",
     status_code=status.HTTP_200_OK,
     tags=["User - Members"],
@@ -248,6 +343,69 @@ async def submit_ticket_for_completion(
 
     # Call CRUD function to submit ticket
     result = crud_submission.submit_ticket_for_completion(
+        db=db,
+        ticket_id=ticket_id,
+        submitted_by_user_id=current_user.id,
+        comment=submission.comment,
+        attachment_url=submission.attachment_url,
+    )
+
+    if "error" in result:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["error"],
+        )
+
+    return result
+
+
+@router.post(
+    "/tickets/{ticket_id}/submit-and-resolve",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    tags=["User - Tickets"],
+    responses={
+        403: {"model": APIResponse, "description": "Not authorized — admin only"},
+        404: {"model": APIResponse, "description": "Ticket not found"},
+    },
+)
+async def submit_and_resolve_ticket(
+    ticket_id: UUID,
+    submission: TicketSubmissionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Admin-only: submit ticket AND resolve (approve) it in one step.
+    Skips the 'processed' review queue since Admin is the highest authority.
+    Sets ticket status directly to 'done'.
+    """
+    role_value = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    if role_value != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can use the submit-and-resolve action",
+        )
+
+    if not current_user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant context missing for current user",
+        )
+
+    # Verify ticket exists and belongs to tenant
+    ticket = db.query(Ticket).filter(
+        Ticket.id == ticket_id,
+        Ticket.tenant_id == current_user.tenant_id,
+    ).first()
+
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    result = crud_submission.submit_and_resolve_ticket(
         db=db,
         ticket_id=ticket_id,
         submitted_by_user_id=current_user.id,
