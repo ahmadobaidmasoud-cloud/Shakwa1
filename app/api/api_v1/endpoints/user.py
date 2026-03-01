@@ -21,7 +21,7 @@ router = APIRouter()
 
 
 @router.get(
-    "/tickets/my-stats",
+    "/my-stats",
     response_model=dict,
     status_code=status.HTTP_200_OK,
     tags=["User - Tickets"],
